@@ -3,9 +3,8 @@
 
 #include <bits/stdc++.h> // for fft
 #include <x86intrin.h> // for vectorization
-#include <omp.h>
-#include <iostream>
-#include <CL/cl2.hpp>
+#include <omp.h> // OpenMP, obviously
+#include <CL/cl2.hpp> // OpenCL, obviously
 
 using namespace std;
 
@@ -42,6 +41,26 @@ void fft(T *in, ftype *out, int n, int k = 1) {
         out[i] += t;
     }
 }
+
+template<typename T>
+void omp_fft(T *in, ftype *out, int n, int k = 1) {
+    if(n == 1) {
+        *out = *in;
+        return;
+    }
+    int t = maxn / n;
+    n >>= 1;
+#pragma omp parallel
+    {
+        fft(in, out, n, 2 * k);
+        fft(in + k, out + n, n, 2 * k);
+    }
+    for(int i = 0, j = 0; i < n; i++, j += t) {
+        ftype t = w[j] * out[i + n];
+        out[i + n] = out[i] - t;
+        out[i] += t;
+    }
+}
  
 signed main() {
     // get the faster IO
@@ -72,7 +91,7 @@ signed main() {
     }
 
     vector<ftype> inv(n);
-    fft(input.data(), inv.data(), n);
+    omp_fft(input.data(), inv.data(), n);
 
     // for (int i = 0; i < n; i++){
     //     cout << inv[i] << endl;
