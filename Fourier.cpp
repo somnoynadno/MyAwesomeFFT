@@ -1,7 +1,7 @@
 #define CL_HPP_ENABLE_EXCEPTIONS
 #define CL_HPP_TARGET_OPENCL_VERSION 200
 
-#define ITER_NUM 100
+#define ITER_NUM 30
 
 #include <bits/stdc++.h> // for fft
 #include <chrono> // to work with time
@@ -20,20 +20,10 @@ g++ Fourier.cpp -o Fourier -pthread -l OpenCL -mssse3 -fopenmp && ./Fourier
 
 typedef complex<double> ftype;
 typedef struct { double r; double i; } w_type;
-const double pi = acos(-1);
-const int maxn = 1024*16*2;
-// ftype w[maxn];
-w_type w_new[maxn];
 
-// generate roots of -1
-void init() {
-    for(int i = 0; i < maxn; i++) {
-        ftype w = polar(1., 2 * pi / maxn * i);
-        w_new[i].r = w.real();
-        w_new[i].i = w.imag();
-    }
-}
- 
+const double pi = acos(-1);
+const long int maxn = 1024*16;
+
 // template<typename T>
 // void fft(T *in, ftype *out, int n, int k = 1) {
 //     if(n == 1) {
@@ -120,7 +110,7 @@ w_type complex_mult(w_type a, w_type b){
     return c;
 }
 
-void fft_c(double *in, w_type *out, int n, int k = 1){
+void fft_c(double *in, w_type *out, w_type *w_new, int n, int k = 1){
     if (n == 1){
         out[0].r = in[0];
         out[0].i = 0;
@@ -129,8 +119,8 @@ void fft_c(double *in, w_type *out, int n, int k = 1){
 
     int t = maxn / n;
     n >>= 1;
-    fft_c(in, out, n, 2 * k);
-    fft_c(in + k, out + n, n, 2 * k);
+    fft_c(in, out, w_new, n, 2 * k);
+    fft_c(in + k, out + n, w_new, n, 2 * k);
 
     for (int i = 0, j = 0; i < n; i++, j += t) {
         w_type res = complex_mult(w_new[j], out[i + n]);
@@ -141,7 +131,7 @@ void fft_c(double *in, w_type *out, int n, int k = 1){
     }
 }
 
-void fft_c_parallel(double *in, w_type *out, int n, int k = 1){
+void fft_c_parallel(double *in, w_type *out, w_type *w_new, int n, int k = 1){
     if (n == 1){
         out[0].r = in[0];
         out[0].i = 0;
@@ -150,12 +140,12 @@ void fft_c_parallel(double *in, w_type *out, int n, int k = 1){
 
     int t = maxn / n;
     n >>= 1;
-    fft_c(in, out, n, 2 * k);
-    fft_c(in + k, out + n, n, 2 * k);
+    fft_c(in, out, w_new, n, 2 * k);
+    fft_c(in + k, out + n, w_new, n, 2 * k);
 
     int j = 0;
 
-#pragma omp parallel for num_threads(4)
+#pragma omp parallel for
     for (int i = 0; i < n; i++) {
         w_type res = complex_mult(w_new[j], out[i + n]);
         out[i + n].r = out[i].r - res.r;
@@ -174,10 +164,18 @@ int main() {
     // get the faster IO
     ios::sync_with_stdio(0);
     cin.tie(0);
-    init();
 
     int n = maxn;
     double input[maxn]; 
+
+    w_type *w_new = new w_type[maxn];
+
+    // to generate roots of -1
+    for(int i = 0; i < maxn; i++) {
+        ftype w = polar(1., 2 * pi / maxn * i);
+        w_new[i].r = w.real();
+        w_new[i].i = w.imag();
+    }
 
     // to generate random signal
     for (int i = 0; i < n; i++){
@@ -247,12 +245,12 @@ int main() {
     // cout << "FFT with vectorization ended with " << t << " ms" << endl;
 
     t = 0;
-    w_type inv4[n];
+    w_type *inv4 = new w_type[n];
     cout << "Start pure C FFT" << endl;
 
     for (int i = 0; i < ITER_NUM; i++){
         t1 = chrono::high_resolution_clock::now();
-        fft_c(input, inv4, n);
+        fft_c(input, inv4, w_new, n);
         t2 = chrono::high_resolution_clock::now();
 
         auto duration = chrono::duration_cast<chrono::milliseconds> (t2 - t1).count();
@@ -265,13 +263,16 @@ int main() {
     cout << "Start parallel pure C FFT" << endl;
     for (int i = 0; i < ITER_NUM; i++){
         t1 = chrono::high_resolution_clock::now();
-        fft_c_parallel(input, inv4, n);
+        fft_c_parallel(input, inv4, w_new, n);
         t2 = chrono::high_resolution_clock::now();
 
         auto duration = chrono::duration_cast<chrono::milliseconds> (t2 - t1).count();
         t += duration;
     }
     cout << "Parallel pure C FFT ended with " << t << " ms" << endl;
+
+    delete[] w_new;
+    delete[] inv4;
 
     // printMyPlatforms();
 
