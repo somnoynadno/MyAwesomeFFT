@@ -1,7 +1,7 @@
 #define CL_HPP_ENABLE_EXCEPTIONS
 #define CL_HPP_TARGET_OPENCL_VERSION 200
 
-#define ITER_NUM 30
+#define ITER_NUM 10
 
 #include <bits/stdc++.h> // for fft
 #include <chrono> // to work with time
@@ -15,7 +15,7 @@ using namespace std;
 
 /*
 COMPILER OPTIONS:
-g++ Fourier.cpp -o Fourier -pthread -l OpenCL -mssse3 && ./Fourier
+g++ Fourier.cpp -o Fourier -pthread -l OpenCL -mssse3 -fopenmp && ./Fourier
 */
 
 typedef complex<double> ftype;
@@ -53,19 +53,23 @@ void omp_fft(T *in, ftype *out, int n, int k = 1) {
         *out = *in;
         return;
     }
-    int t = maxn / n;
     n >>= 1;
 
     omp_fft(in, out, n, 2 * k);
     omp_fft(in + k, out + n, n, 2 * k);
 
-#pragma omp parallel
+    const int t1 = maxn / n;
+    int j = 0;
+
+#pragma omp parallel num_threads(2) 
     {
     #pragma omp for
-        for(int i = 0, j = 0; i < n; i++, j += t) {
+        for (int i = 0; i < n; i++) {
             ftype t = w[j] * out[i + n];
             out[i + n] = out[i] - t;
             out[i] += t;
+        #pragma omp atomic
+            j += t1;
         }
     }
 }
@@ -184,7 +188,7 @@ int main() {
     }
     cout << "FFT with vectorization ended with " << t/ITER_NUM << " ms" << endl;
 
-    printMyPlatforms();
+    // printMyPlatforms();
 
     return 0;
 }
