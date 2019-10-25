@@ -1,8 +1,11 @@
 #define CL_HPP_ENABLE_EXCEPTIONS
 #define CL_HPP_TARGET_OPENCL_VERSION 200
 
+#define ITER_NUM 30
+
 #include <bits/stdc++.h> // for fft
 #include <chrono> // to work with time
+#include <stdexcept> // to throw exception
 #include <stdint.h> // fix-sized integers
 #include <x86intrin.h> // for vectorization
 #include <omp.h> // OpenMP, obviously
@@ -52,15 +55,18 @@ void omp_fft(T *in, ftype *out, int n, int k = 1) {
     }
     int t = maxn / n;
     n >>= 1;
+
+    omp_fft(in, out, n, 2 * k);
+    omp_fft(in + k, out + n, n, 2 * k);
+
 #pragma omp parallel
     {
-        omp_fft(in, out, n, 2 * k);
-        omp_fft(in + k, out + n, n, 2 * k);
-    }
-    for(int i = 0, j = 0; i < n; i++, j += t) {
-        ftype t = w[j] * out[i + n];
-        out[i + n] = out[i] - t;
-        out[i] += t;
+    #pragma omp for
+        for(int i = 0, j = 0; i < n; i++, j += t) {
+            ftype t = w[j] * out[i + n];
+            out[i + n] = out[i] - t;
+            out[i] += t;
+        }
     }
 }
 
@@ -99,6 +105,8 @@ void fft_with_vec(double *in, __m128d *out, int n, int k = 1) {
     }
 }
 
+void printMyPlatforms();
+
 int main() {
     // get the faster IO
     ios::sync_with_stdio(0);
@@ -130,44 +138,121 @@ int main() {
 
     chrono::high_resolution_clock::time_point t1;
     chrono::high_resolution_clock::time_point t2;
+    int t = 0;
 
     cout << "Current number of elements is " << n << endl;
+    cout << "Current number of iteration is " << ITER_NUM << endl;
 
     vector<ftype> inv(n);
     cout << "Start FFT" << endl;
+    
+    for (int i = 0; i < ITER_NUM; i++){
+        t1 = chrono::high_resolution_clock::now();
+        fft(input.data(), inv.data(), n);
+        t2 = chrono::high_resolution_clock::now();
 
-    t1 = chrono::high_resolution_clock::now();
-    fft(input.data(), inv.data(), n);
-    t2 = chrono::high_resolution_clock::now();
+        auto duration = chrono::duration_cast<chrono::milliseconds> (t2 - t1).count();
+        t += duration;
+    }
+    cout << "FFT ended with " << t/ITER_NUM << " ms" << endl;
 
-    auto duration = chrono::duration_cast<chrono::milliseconds> (t2 - t1).count();
-    cout << "FFT ended with " << duration << " ms" << endl;
-
+    t = 0;
     vector<ftype> inv2(n);
     cout << "Start FFT with OpenMP" << endl;
 
-    t1 = chrono::high_resolution_clock::now();
-    omp_fft(input.data(), inv2.data(), n);
-    t2 = chrono::high_resolution_clock::now();
+    for (int i = 0; i < ITER_NUM; i++){
+        t1 = chrono::high_resolution_clock::now();
+        omp_fft(input.data(), inv2.data(), n);
+        t2 = chrono::high_resolution_clock::now();
 
-    duration = chrono::duration_cast<chrono::milliseconds> (t2 - t1).count();
-    cout << "FFT with OpenMP ended with " << duration << " ms" << endl;
+        auto duration = chrono::duration_cast<chrono::milliseconds> (t2 - t1).count();
+        t += duration;
+    }
+    cout << "FFT with OpenMP ended with " << t/ITER_NUM << " ms" << endl;
 
+    t = 0;
     __m128d inv3[n];
     cout << "Start FFT with vectorization" << endl;
 
-    t1 = chrono::high_resolution_clock::now();
-    fft_with_vec(input.data(), inv3, n);
-    t2 = chrono::high_resolution_clock::now();
+    for (int i = 0; i < ITER_NUM; i++){
+        t1 = chrono::high_resolution_clock::now();
+        fft_with_vec(input.data(), inv3, n);
+        t2 = chrono::high_resolution_clock::now();
 
-    duration = chrono::duration_cast<chrono::milliseconds> (t2 - t1).count();
-    cout << "FFT with vectorization ended with " << duration << " ms" << endl;
+        auto duration = chrono::duration_cast<chrono::milliseconds> (t2 - t1).count();
+        t += duration;
+    }
+    cout << "FFT with vectorization ended with " << t/ITER_NUM << " ms" << endl;
 
-    // for (int i = 0; i < 10; i++){
-    //     cout << inv[i] << endl;
-    //     cout << inv3[i][0] << " " << inv3[i][1] << endl;
-    // }
+    printMyPlatforms();
 
     return 0;
 }
  
+
+void printMyPlatforms(){
+    int i, j;
+    char* value;
+    size_t valueSize;
+    cl_uint platformCount;
+    cl_platform_id* platforms;
+    cl_uint deviceCount;
+    cl_device_id* devices;
+    cl_uint maxComputeUnits;
+
+    // get all platforms
+    clGetPlatformIDs(0, NULL, &platformCount);
+    platforms = (cl_platform_id*) malloc(sizeof(cl_platform_id) * platformCount);
+    clGetPlatformIDs(platformCount, platforms, NULL);
+
+    for (i = 0; i < platformCount; i++) {
+
+        // get all devices
+        clGetDeviceIDs(platforms[i], CL_DEVICE_TYPE_ALL, 0, NULL, &deviceCount);
+        devices = (cl_device_id*) malloc(sizeof(cl_device_id) * deviceCount);
+        clGetDeviceIDs(platforms[i], CL_DEVICE_TYPE_ALL, deviceCount, devices, NULL);
+
+        // for each device print critical attributes
+        for (j = 0; j < deviceCount; j++) {
+
+            // print device name
+            clGetDeviceInfo(devices[j], CL_DEVICE_NAME, 0, NULL, &valueSize);
+            value = (char*) malloc(valueSize);
+            clGetDeviceInfo(devices[j], CL_DEVICE_NAME, valueSize, value, NULL);
+            printf("%d. Device: %s\n", j+1, value);
+            free(value);
+
+            // print hardware device version
+            clGetDeviceInfo(devices[j], CL_DEVICE_VERSION, 0, NULL, &valueSize);
+            value = (char*) malloc(valueSize);
+            clGetDeviceInfo(devices[j], CL_DEVICE_VERSION, valueSize, value, NULL);
+            printf(" %d.%d Hardware version: %s\n", j+1, 1, value);
+            free(value);
+
+            // print software driver version
+            clGetDeviceInfo(devices[j], CL_DRIVER_VERSION, 0, NULL, &valueSize);
+            value = (char*) malloc(valueSize);
+            clGetDeviceInfo(devices[j], CL_DRIVER_VERSION, valueSize, value, NULL);
+            printf(" %d.%d Software version: %s\n", j+1, 2, value);
+            free(value);
+
+            // print c version supported by compiler for device
+            clGetDeviceInfo(devices[j], CL_DEVICE_OPENCL_C_VERSION, 0, NULL, &valueSize);
+            value = (char*) malloc(valueSize);
+            clGetDeviceInfo(devices[j], CL_DEVICE_OPENCL_C_VERSION, valueSize, value, NULL);
+            printf(" %d.%d OpenCL C version: %s\n", j+1, 3, value);
+            free(value);
+
+            // print parallel compute units
+            clGetDeviceInfo(devices[j], CL_DEVICE_MAX_COMPUTE_UNITS,
+                    sizeof(maxComputeUnits), &maxComputeUnits, NULL);
+            printf(" %d.%d Parallel compute units: %d\n", j+1, 4, maxComputeUnits);
+
+        }
+
+        free(devices);
+
+    }
+
+    free(platforms);
+}
